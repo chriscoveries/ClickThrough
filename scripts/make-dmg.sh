@@ -16,7 +16,8 @@ ln -s /Applications "$STAGE/Applications"
 rm -f "$DMG"
 if diskutil image create from --help >/dev/null 2>&1; then
   # macOS 26+ replacement for `hdiutil create`.
-  diskutil image create from --format UDZO --volumeName ClickThrough "$STAGE" "$DMG" >/dev/null
+  # The source folder is named ClickThrough; this command has no --volumeName option.
+  diskutil image create from --format UDZO "$STAGE" "$DMG" >/dev/null
 else
   hdiutil create -volname ClickThrough -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
 fi
