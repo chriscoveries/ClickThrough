@@ -20,9 +20,19 @@ Only an actual click activates anything.
 
 ## Install
 
-Build this fork from source for same-display support. The
-[upstream releases](https://github.com/PirouzSR/ClickThrough/releases/latest)
-only include cross-display click-through.
+### Download the macOS test build
+
+The [macOS CI workflow](https://github.com/chriscoveries/ClickThrough/actions/workflows/macos-tests.yml)
+builds a universal `ClickThrough.dmg` from this fork. Open a successful run,
+download the `ClickThrough-macOS-universal` artifact, unzip it, then open the
+DMG and drag `ClickThrough.app` into `/Applications`. GitHub may require you to
+sign in to download workflow artifacts.
+
+The CI build is ad-hoc signed and is not notarized. On first launch, you may
+need to right-click the app and choose **Open**. This is a test build pending
+real-Mac checks of same-monitor behaviour.
+
+### Build from source
 
 To build:
 
@@ -34,13 +44,6 @@ To build:
 
 2. Drag `build/ClickThrough.app` to `/Applications`.
 
-Either way, then:
-
-3. Launch it once. macOS will ask for Accessibility permission — grant it in
-   System Settings › Privacy & Security › Accessibility.
-4. Done. It registers itself as a login item, so it starts automatically from
-   then on.
-
 If you build from source and expect to rebuild, see [Keeping the Accessibility
 permission across rebuilds](#keeping-the-accessibility-permission-across-rebuilds)
 first - otherwise macOS asks for the permission again after every build.
@@ -48,11 +51,13 @@ first - otherwise macOS asks for the permission again after every build.
 `./scripts/make-dmg.sh` produces `build/ClickThrough.dmg` with a
 drag-to-Applications layout if you prefer to install that way.
 
+For either installation method, launch ClickThrough and grant its Accessibility
+permission in System Settings › Privacy & Security › Accessibility. It registers
+itself as a login item for subsequent logins.
+
 ## Using it
 
-The menu bar icon is the entire interface:
-
-<img src="docs/menu.png" width="202" alt="The ClickThrough menu: Enabled (checked), Quit ClickThrough">
+The menu bar icon is the entire interface. Both options below are on by default:
 
 * **Enabled** toggles interception. When off, the event tap is torn down and
   macOS behaves exactly as it normally does. The setting persists across launches
@@ -164,12 +169,16 @@ when the target window is inactive.
 The wait for a slow application is the one unavoidable cost, and it is bounded:
 200 ms, against a measured event-tap limit of 1000-1500 ms.
 
-### Deliberate non-interference
+<a id="deliberate-non-interference"></a>
+### Safety exceptions
 
-A click is passed through untouched when:
+**Same-monitor click-through is on by default.** A click on an ordinary inactive
+window on the current monitor follows the same activation path as a click on
+another monitor, including when both windows belong to the same app.
 
-* **Cross-display-only mode is selected, and the click stays on the focused
-  display.** This optional restriction retains upstream behavior.
+ClickThrough leaves the following clicks to macOS without pre-activating the
+window underneath:
+
 * **Command or Control is held.** ⌘-click already means "interact without
   activating" and ⌃-click means "context menu"; both are left to macOS.
 * **A menu is open anywhere** (any window at the pop-up-menu level). A click
@@ -191,6 +200,10 @@ A click is passed through untouched when:
   popover, tooltip, HUD or system overlay.
 * The window belongs to ClickThrough itself, or to a process that cannot be
   activated.
+
+When **Click between windows on the same monitor** is switched off, clicks on
+the focused monitor are also left to macOS. This optional setting restores
+upstream's cross-display-only policy.
 
 Four window-server details the targeting has to allow for, all observed on
 macOS 27:
