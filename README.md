@@ -1,32 +1,30 @@
 # ClickThrough
 
-A menu bar utility that stops macOS wasting the first click when you click from
-one display onto another.
+A lightweight, MIT-licensed macOS menu bar utility that makes the first click
+on an inactive window work, even when both windows are on the same monitor.
+Based on [PirouzSR/ClickThrough](https://github.com/PirouzSR/ClickThrough).
 
-Normally, clicking a control in a window on your other monitor only moves focus
+Normally, clicking certain controls in an inactive window only moves focus
 there; the click itself is discarded and you have to click again. ClickThrough
 activates the window's application *before* the click is delivered, so the click
 lands where you aimed it. One physical click, one action.
 
-**Only clicks that cross displays are touched.** A click that stays on the
-display that already has focus is left entirely to macOS, and on a single-display
-Mac the utility does nothing at all. That is deliberate: the wasted click is
-worst when it crosses monitors, and every intervention risks getting a click
-wrong — pushing it through to the window behind a notification, a Dock stack, or
-some system surface drawn into a window that covers the whole screen. Narrow
-scope, no surprises. See [Deliberate non-interference](#deliberate-non-interference).
+**Same-display click-through is enabled by default.** This includes switching
+between two windows of one application. The menu bar offers a switch to restore
+upstream's cross-display-only behavior. System menus, the Dock, notifications,
+and other overlays retain their protective checks. Same-display behavior needs
+real-Mac regression testing before a public release; see [Testing](TESTING.md).
 
 It is **not** focus-follows-mouse: moving the pointer over a window does nothing.
 Only an actual click activates anything.
 
 ## Install
 
-Download the latest `.dmg` from [Releases](https://github.com/PirouzSR/ClickThrough/releases/latest),
-open it and drag **ClickThrough** to Applications. That build is ad-hoc signed
-and not notarized, so the first launch needs right-click › **Open** › Open.
-It is a universal binary; only Apple silicon has been tested.
+Build this fork from source for same-display support. The
+[upstream releases](https://github.com/PirouzSR/ClickThrough/releases/latest)
+only include cross-display click-through.
 
-To build it yourself instead:
+To build:
 
 1. ```
    ./scripts/build-release.sh
@@ -59,22 +57,24 @@ The menu bar icon is the entire interface:
 * **Enabled** toggles interception. When off, the event tap is torn down and
   macOS behaves exactly as it normally does. The setting persists across launches
   and defaults to on.
+* **Click between windows on the same monitor** enables one-click interactions
+  with inactive windows on the focused display, including other windows of
+  the active application. On by default; turn it off for the original
+  cross-display-only policy.
 * The icon is slashed when disabled, and dimmed when it is enabled but cannot
   work because Accessibility permission is missing. An **Open Accessibility
   Settings…** item appears in the menu only in that case.
 
-There are no other settings.
+Both preferences persist across launches.
 
 ## How it works
 
 A `CGEventTap` watches left mouse-down. For each one:
 
 1. Read the on-screen window list, front to back.
-2. Work out which display the click is on, and which display has focus — the one
-   holding the frontmost application's front window. **If they are the same
-   display, do nothing.** This is the majority of clicks and they cost one
-   window-list read and 1 µs of arithmetic.
-3. Otherwise find the topmost ordinary window under the pointer. If it is
+2. Check that the click is on a connected display. In cross-display-only mode,
+   also check that it is on a different display from the one holding focus.
+3. Find the topmost ordinary window under the pointer. If it is
    already its application's front window and that application is already
    frontmost, do nothing.
 4. Otherwise activate that application — raising and focusing the specific
@@ -139,12 +139,14 @@ re-arms it every second, which is the longest the utility can stay dead.
 
 ### What it costs
 
-Measured on an M-series laptop with two displays, with the shipping build:
+Historical upstream measurements on an M-series laptop with two displays,
+using the cross-display-only build. Same-display mode has not yet been
+benchmarked on hardware:
 
 | | |
 |---|---|
 | Idle | 0.020 s of CPU per 90 s - 0.02% of one core - and 15 MB of memory |
-| A click on the display that already has focus | 0.3 ms: one window-server query, then 1 µs to decide |
+| A click on the display that already has focus (restricted mode) | 0.3 ms: one window-server query, then 1 µs to decide |
 | A click that crosses displays but needs no action | 0.3 ms, and 6 µs to decide |
 | A click that activates another application | 13-40 ms, almost all of it waiting for that application to be ready |
 | Each event of a drag | ~1 µs |
@@ -155,9 +157,9 @@ the system is showing its own UI, is decided without reading it at all and costs
 0.1 ms. And micro-optimising the decision logic would be pointless, because at
 1-6 µs it is already under 2% of the work.
 
-Restricting the utility to clicks that cross displays is itself the largest
-saving there has been: the everyday click now asks nothing of any other process
-and activates nothing, so it costs the window-list read and no more.
+Selecting cross-display-only mode saves work on same-monitor clicks. The
+default also handles those clicks, which can take the full activation wait
+when the target window is inactive.
 
 The wait for a slow application is the one unavoidable cost, and it is bounded:
 200 ms, against a measured event-tap limit of 1000-1500 ms.
@@ -166,10 +168,8 @@ The wait for a slow application is the one unavoidable cost, and it is bounded:
 
 A click is passed through untouched when:
 
-* **It does not cross displays.** If the click is on the display that already
-  holds focus, macOS handles it exactly as it always has. This is the first rule
-  and it decides most clicks - see the note below on why the scope is drawn
-  there.
+* **Cross-display-only mode is selected, and the click stays on the focused
+  display.** This optional restriction retains upstream behavior.
 * **Command or Control is held.** ⌘-click already means "interact without
   activating" and ⌃-click means "context menu"; both are left to macOS.
 * **A menu is open anywhere** (any window at the pop-up-menu level). A click
@@ -209,12 +209,11 @@ macOS 27:
   frontmost. Nothing else can tell a click on one of those from a click on the
   window behind it. Each is asked only for a click that would otherwise activate
   something, and only when its own window covers that click.
-* Which is the second reason the scope is drawn at display boundaries. That
-  pattern — a system surface painted into a window the size of the screen — is
-  not a fixed list: it is whatever this version of macOS happens to do, and each
-  instance of it that goes unrecognised is a click pushed through to the window
-  behind. Ignoring every click that stays on the focused display removes most of
-  that surface area outright, rather than needing the list to be complete.
+* A system surface painted into a display-sized window can escape these
+  checks when macOS changes its Accessibility hierarchy. Same-display support
+  broadens that risk, so it remains configurable. Before releasing, test
+  notification close buttons, Dock stacks, menus, and Mission Control on the
+  target macOS version.
 * **`NSScreen.visibleFrame` reserves the menu bar and Dock strips permanently**,
   on every display, whether or not either is on screen. A full-screen window
   covers those strips, and a video player puts its controls exactly there, so
@@ -222,16 +221,14 @@ macOS 27:
 
 ### Multiple displays
 
-Displays are the whole subject: a click is acted on only when it lands on a
-different display from the one that holds focus. "The display that holds focus"
-means the one showing the frontmost application's front window — or, when the
-frontmost application has no window on screen at all, which is what Finder looks
-like after a click on the desktop, the one showing whatever window is topmost. A
+The default works with either one or several displays. In optional
+cross-display-only mode, a click is acted on only when it lands on a different
+display from the one that holds focus. The focus display is inferred from the
+frontmost application's front window or, if necessary, the topmost window. A
 window straddling two displays counts as being on the one showing more of it.
 
-With one display connected, those two are always the same display and the
-utility never acts. It still runs, and starts working the moment a second
-display is attached.
+With one display connected, cross-display-only mode leaves clicks untouched.
+Default mode continues to activate inactive windows on that display.
 
 All geometry is handled in Core Graphics global coordinates — the same space
 used by both `CGEvent.location` and `kCGWindowBounds`. Displays at negative
@@ -254,15 +251,15 @@ granted, which it notices within a couple of seconds without needing a restart.
 
 ## Requirements and compatibility
 
-* macOS 13 or later (built and verified on macOS 27).
+* macOS 13 or later (upstream verified on macOS 27; this fork's same-display
+  changes still need hardware validation).
 * No third-party dependencies of any kind; Apple frameworks only.
 * Swift 6 language mode, strict concurrency enabled.
 
 ## Known limitations
 
-* **A click that does not cross displays is still wasted**, exactly as on a
-  stock Mac, and on a single-display Mac nothing is ever intercepted. That is
-  the deliberate scope described at the top, not an oversight.
+* **A few apps may still consume a click** even after activation, depending on
+  how their custom controls handle mouse events.
 * **Applications that explicitly discard clicks received while inactive** cannot
   be fixed this way, because the decision happens inside that app after the
   event is delivered. Pre-activation handles every standard AppKit view tested.
@@ -274,7 +271,7 @@ granted, which it notices within a couple of seconds without needing a restart.
   Control, because the opposite mistake would look like the utility was dead.
 * **Notifications are recognised from Notification Center's own Accessibility
   hierarchy**, which is not a documented contract. If a future macOS rearranges
-  it, a click on a notification on a display that does not have focus would go
+  it, a click on a notification could go
   back to activating the window behind it. That check also errs towards missing
   notifications rather than over-claiming a region of the screen.
 

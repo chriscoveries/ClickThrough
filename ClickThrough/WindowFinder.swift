@@ -118,6 +118,9 @@ enum WindowFinder {
     ///   - screens: current display layout.
     ///   - ownPID: this process, which must never activate itself.
     ///   - modifiers: modifier keys held at mouse-down.
+    ///   - includeSameDisplay: enable one-click activation of inactive windows
+    ///     on the focused display, including windows of the same application.
+    ///     Disable this to retain upstream's cross-display-only policy.
     ///   - dockState: asks the Dock what it is showing. Injected so that the
     ///     whole policy stays a pure function, and only consulted for a click
     ///     that would otherwise activate something.
@@ -130,6 +133,7 @@ enum WindowFinder {
                        screens: [ScreenInfo],
                        ownPID: pid_t,
                        modifiers: CGEventFlags,
+                       includeSameDisplay: Bool = true,
                        dockState: (pid_t) -> DockState? = { _ in nil },
                        notificationRects: (pid_t, CGRect) -> [CGRect] = { _, _ in [] }) -> ClickAction {
         // Command-click and control-click already have their own meanings on an
@@ -148,33 +152,20 @@ enum WindowFinder {
         let windows = windows()
         let displays = screens.map(\.frame)
 
-        // The click this utility exists for is the one that crosses displays:
-        // the window you clicked is on a different screen from the one that has
-        // focus, so macOS spends your click on moving focus there instead of on
-        // the thing you clicked.
-        //
-        // macOS discards that first click within a single display too, and this
-        // deliberately no longer does anything about it. Every intervention is a
-        // chance to get a click wrong, and the repeated way to get one wrong is a
-        // system surface painted into a window that covers a whole display - a
-        // notification and its close button, a Dock stack, something this code
-        // has never seen - which the targeting below looks straight past, so the
-        // click lands on the window behind it instead. That list is not fixed:
-        // it is whatever this version of macOS happens to do. Standing aside for
-        // clicks that stay on the focused display removes most of that risk
-        // without having to keep the list complete, at the price of leaving the
-        // smaller annoyance - the window you wanted is on the screen you are
-        // already looking at - to macOS. It also means a single-display setup
-        // never sees this utility do anything at all.
+        // A click outside every connected display cannot be directed at a window.
         guard let clickedDisplay = display(containing: point, in: displays) else {
-            // Between or beyond the displays: there is no window there either.
             return .ignore(.noWindowUnderCursor)
         }
-        guard let focusedDisplay = focusDisplay(frontmostPID: frontmostPID,
-                                                windows: windows, displays: displays) else {
-            return .ignore(.focusDisplayUnknown)
+        // Keep upstream's restricted policy as an option. The default also
+        // handles two windows on one monitor, where the second click is wasted.
+        // All system-UI guards below must run for those newly supported clicks.
+        if !includeSameDisplay {
+            guard let focusedDisplay = focusDisplay(frontmostPID: frontmostPID,
+                                                    windows: windows, displays: displays) else {
+                return .ignore(.focusDisplayUnknown)
+            }
+            guard clickedDisplay != focusedDisplay else { return .ignore(.sameDisplay) }
         }
-        guard clickedDisplay != focusedDisplay else { return .ignore(.sameDisplay) }
 
         // Mission Control. It is owned by `WindowManager`, and - measured on
         // macOS 27 - it does *not* become the frontmost application, so the check

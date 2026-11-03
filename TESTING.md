@@ -3,8 +3,9 @@
 ## Automated
 
 `ClickThroughTests/WindowFinderTests.swift` covers the click policy, which is a
-pure function and therefore testable without a window server. 45 tests: the
-cross-display rule itself (same display, single display, straddling windows,
+pure function and therefore testable without a window server. 53 tests: the
+same-display default and optional cross-display restriction (single display,
+same-app background windows, inactive windows of another app, straddling windows,
 focus falling back to the topmost window when the frontmost application has
 none, nothing on screen at all), active vs inactive windows, background windows
 of the active and of an inactive application, negative-coordinate secondary
@@ -18,10 +19,10 @@ cost rules - the window list read lazily and exactly once, and neither the Dock
 nor Notification Center asked unless its own window is over the click - and the
 AppKit→CoreGraphics coordinate flip.
 
-Because the policy now acts only on a click that crosses displays, nearly every
-fixture includes a window of the frontmost application on the *other* display;
-`act(...)` adds one by default. A fixture without it is testing what happens
-when the click does not cross displays.
+Fixtures generally include a window of the frontmost application on the other
+display, as in the original suite. Same-display tests explicitly place focus
+on the clicked display. The `includeSameDisplay: false` parameter exercises the
+original cross-display-only policy.
 
 ```
 xcodebuild -project ClickThrough.xcodeproj -scheme ClickThrough test
@@ -55,6 +56,10 @@ DYLD_FRAMEWORK_PATH=$XCF DYLD_LIBRARY_PATH=/tmp/ct $XC/usr/bin/xctest $B
 
 
 ## Performance
+
+**Historical upstream results below.** These measurements were taken before
+same-display support was re-enabled. Re-run them on the target Mac before
+claiming performance or reliability for this fork.
 
 Profiled with the shipping engine, 42 clicks and a 200-event drag, on a
 two-display setup:
@@ -458,16 +463,21 @@ did simply activating and returning the original event, which is strictly safer.
 
 ## Manual checklist
 
-Put an inactive window on a second display, then click directly on a control.
-Two displays are required for any of this: a click that stays on the display
-that has focus is deliberately left to macOS.
+Put two windows side by side on one monitor, then click controls directly.
+Repeat with a second monitor if one is available. Test both menu settings.
 
 Basic
 - [ ] Click on an already-active window behaves normally
+- [ ] Two windows of **different apps on the same monitor**: the first click
+      acts on the control in the inactive window
+- [ ] Two windows of **the same app on the same monitor**: click the back
+      window's exposed area and confirm the control responds immediately
+- [ ] Two partially overlapping windows: clicking an exposed control in the
+      back window activates that exact window without a second click
 - [ ] Click on an inactive window **on another display** performs the action
       immediately
-- [ ] Click on an inactive window on the display that already has focus behaves
-      exactly as it does with the utility disabled - this is intended
+- [ ] Unchecking **Click between windows on the same monitor** restores
+      upstream's cross-display-only behavior
 - [ ] Displays with different resolutions / scale factors
 - [ ] Displays arranged vertically and at odd offsets
 - [ ] Toggling Enabled off restores stock macOS behaviour, on restores interception
@@ -485,13 +495,13 @@ Must not misbehave
 - [ ] Dock clicks behave normally - ordinary, auto-hidden, and on the left or right edge
 - [ ] Dock stacks: clicking a file in the fan selects it; dragging one out works
 - [ ] A notification banner: clicking its close button dismisses it and does not
-      bring the window behind it forward, including while focus is on another
-      display
+      bring the window behind it forward, both on the focused display and another
 - [ ] The notification panel from the clock, and Control Center
 - [ ] Context menus, sheets, dialogs, popovers
 - [ ] Mission Control
 - [ ] Clicking the wallpaper, then clicking a window again
 - [ ] Dragging from an inactive window
+- [ ] Double-click an inactive window: both clicks arrive in order
 - [ ] Right-click and ⌘-click on an inactive window
 - [ ] Full-screen windows, including clicks along the top and bottom edges where
       the menu bar and Dock would otherwise be
