@@ -1,6 +1,6 @@
 import AppKit
 
-/// The only visible part of the application: one menu bar item with a two-item menu.
+/// The only visible part of the application: a small menu bar menu.
 @MainActor
 final class StatusBarController {
     private let statusItem: NSStatusItem
@@ -8,6 +8,8 @@ final class StatusBarController {
     private let accessibility: AccessibilityManager
 
     private let enabledItem = NSMenuItem(title: "Enabled", action: #selector(toggleEnabled), keyEquivalent: "")
+    private let sameDisplayItem = NSMenuItem(title: "Click between windows on the same monitor",
+                                             action: #selector(toggleSameDisplay), keyEquivalent: "")
     private let accessibilityItem = NSMenuItem(title: "Open Accessibility Settings…",
                                                action: #selector(openAccessibilitySettings), keyEquivalent: "")
 
@@ -18,8 +20,10 @@ final class StatusBarController {
 
         let menu = NSMenu()
         enabledItem.target = self
+        sameDisplayItem.target = self
         accessibilityItem.target = self
         menu.addItem(enabledItem)
+        menu.addItem(sameDisplayItem)
         menu.addItem(accessibilityItem)
         menu.addItem(.separator())
         let quit = NSMenuItem(title: "Quit ClickThrough", action: #selector(quit), keyEquivalent: "q")
@@ -48,12 +52,17 @@ final class StatusBarController {
         button.appearsDisabled = enabled && !active
 
         enabledItem.state = enabled ? .on : .off
+        sameDisplayItem.state = controller.includesSameDisplay ? .on : .off
         // Only surfaced when it is actually needed, so the normal menu stays tiny.
         accessibilityItem.isHidden = accessibility.isTrusted
     }
 
     @objc private func toggleEnabled() {
         controller.setEnabled(!controller.isEnabled)
+    }
+
+    @objc private func toggleSameDisplay() {
+        controller.setIncludesSameDisplay(!controller.includesSameDisplay)
     }
 
     @objc private func openAccessibilitySettings() {

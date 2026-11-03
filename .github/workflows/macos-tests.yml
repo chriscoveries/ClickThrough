@@ -1,0 +1,26 @@
+name: macOS tests
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: macos-15
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - name: Test click policy
+        run: |
+          xcodebuild -quiet \
+            -project ClickThrough.xcodeproj \
+            -scheme ClickThrough \
+            -configuration Debug \
+            -destination 'platform=macOS' \
+            -parallel-testing-enabled NO \
+            CODE_SIGNING_ALLOWED=NO \
+            test

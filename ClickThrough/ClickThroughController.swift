@@ -11,9 +11,11 @@ final class ClickThroughController: @unchecked Sendable {
         var frontmostPID: pid_t = -1
         var frontmostIsSystemUI = false
         var screens: [ScreenInfo] = []
+        var includeSameDisplay = true
     }
 
     private static let enabledDefaultsKey = "ClickThroughEnabled"
+    private static let sameDisplayDefaultsKey = "ClickThroughSameDisplayEnabled"
 
     /// How long the utility may stay dead after the system disables the tap.
     private static let watchdogInterval: TimeInterval = 1
@@ -31,14 +33,24 @@ final class ClickThroughController: @unchecked Sendable {
         didSet { UserDefaults.standard.set(isEnabled, forKey: Self.enabledDefaultsKey) }
     }
 
+    /// Enable one-click actions between windows on the same monitor by default.
+    private(set) var includesSameDisplay: Bool {
+        didSet { UserDefaults.standard.set(includesSameDisplay, forKey: Self.sameDisplayDefaultsKey) }
+    }
+
     /// True when clicks are actually being intercepted right now. This is false
     /// when the user has switched the utility off *or* when Accessibility
     /// permission has not been granted.
     var isActive: Bool { tap?.isRunning ?? false }
 
     init() {
-        UserDefaults.standard.register(defaults: [Self.enabledDefaultsKey: true])
+        UserDefaults.standard.register(defaults: [
+            Self.enabledDefaultsKey: true,
+            Self.sameDisplayDefaultsKey: true,
+        ])
         isEnabled = UserDefaults.standard.bool(forKey: Self.enabledDefaultsKey)
+        includesSameDisplay = UserDefaults.standard.bool(forKey: Self.sameDisplayDefaultsKey)
+        environment.withLock { $0.includeSameDisplay = includesSameDisplay }
 
         tap = EventTap { [weak self] event in self?.handleMouseDown(event) }
 
@@ -66,6 +78,13 @@ final class ClickThroughController: @unchecked Sendable {
         guard enabled != isEnabled else { return }
         isEnabled = enabled
         syncTapState()
+    }
+
+    func setIncludesSameDisplay(_ enabled: Bool) {
+        guard enabled != includesSameDisplay else { return }
+        includesSameDisplay = enabled
+        environment.withLock { $0.includeSameDisplay = enabled }
+        onStateChanged?()
     }
 
     /// Starts or stops the tap so that it matches the user preference and the
@@ -107,6 +126,7 @@ final class ClickThroughController: @unchecked Sendable {
                                          screens: snapshot.screens,
                                          ownPID: ownPID,
                                          modifiers: event.flags,
+                                         includeSameDisplay: snapshot.includeSameDisplay,
                                          dockState: DockInspector.state,
                                          notificationRects: NotificationCenterInspector.contentRects(pid:window:))
 

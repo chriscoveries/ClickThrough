@@ -35,12 +35,8 @@ final class WindowFinderTests: XCTestCase {
     /// Where focus is, for a fixture whose click is on the primary display: a
     /// window of the frontmost application, on the secondary one.
     ///
-    /// Almost every fixture needs one, because the policy only ever acts on a
-    /// click that lands on a different display from the one holding focus -
-    /// without it, a click on the primary display would not cross displays and
-    /// the right answer would be "do nothing". It is put at the front of the
-    /// window list so that it is unambiguously that application's front window,
-    /// and kept small and out of the way so that it is never what is clicked.
+    /// It also supplies an explicit focus display for the legacy
+    /// cross-display-only mode. Kept out of the clicked window's way.
     private var focusOnSecondary: WindowSnapshot {
         window(pid: frontPID, id: 100, rect: CGRect(x: -200, y: -200, width: 200, height: 200))
     }
@@ -105,7 +101,8 @@ final class WindowFinderTests: XCTestCase {
                      dockShowsStack: Bool = false, dockSilent: Bool = false,
                      notificationRects: [CGRect] = [],
                      focus: [WindowSnapshot]? = nil,
-                     screens: [ScreenInfo]? = nil) -> ClickAction {
+                     screens: [ScreenInfo]? = nil,
+                     includeSameDisplay: Bool = true) -> ClickAction {
         WindowFinder.action(for: point,
                             windows: { (focus ?? [self.focusOnSecondary]) + windows },
                             frontmostPID: frontmostPID ?? frontPID,
@@ -113,32 +110,63 @@ final class WindowFinderTests: XCTestCase {
                             screens: screens ?? self.screens,
                             ownPID: ownPID,
                             modifiers: modifiers,
+                            includeSameDisplay: includeSameDisplay,
                             dockState: { _ in
                                 dockSilent ? nil : DockState(strip: dockStrip, showsStack: dockShowsStack)
                             },
                             notificationRects: { _, _ in notificationRects })
     }
 
-    // MARK: - Only across displays
+    // MARK: - Same-display click-through
 
-    /// The rule the whole utility now hangs on: a click that does not move focus
-    /// to another display is macOS's business, not this app's.
-    func testClickWithinTheFocusedDisplayIsLeftToMacOS() {
+    func testClickOnInactiveAppOnSameDisplayActsOnFirstClick() {
         let inactive = window(pid: otherPID, id: 2, rect: CGRect(x: 100, y: 100, width: 400, height: 300))
         XCTAssertEqual(act(CGPoint(x: 200, y: 200), [inactive], focus: [focusOnPrimary]),
-                       .ignore(.sameDisplay))
+                       .activate(pid: otherPID, windowID: 2, windowBounds: inactive.bounds,
+                                 raiseWindow: false))
     }
 
-    /// Which means a machine with one display never sees it do anything at all.
-    func testSingleDisplaySetupIsNeverTouched() {
+    func testSingleDisplaySetupActivatesInactiveWindows() {
         let inactive = window(pid: otherPID, id: 2, rect: CGRect(x: 100, y: 100, width: 400, height: 300))
         XCTAssertEqual(act(CGPoint(x: 200, y: 200), [inactive],
                            focus: [focusOnPrimary], screens: [primary]),
-                       .ignore(.sameDisplay))
+                       .activate(pid: otherPID, windowID: 2, windowBounds: inactive.bounds,
+                                 raiseWindow: false))
     }
 
     func testClickOnTheActiveWindowIsLeftAlone() {
         XCTAssertEqual(act(CGPoint(x: 700, y: 500), [fullWindow(pid: frontPID, id: 1)], focus: []),
+                       .ignore(.alreadyFrontWindow))
+    }
+
+    func testClickOnBackgroundWindowOfActiveAppOnSameDisplayRaisesIt() {
+        let appFront = window(pid: frontPID, id: 1, rect: CGRect(x: 100, y: 100, width: 400, height: 350))
+        let appBack = window(pid: frontPID, id: 2, rect: CGRect(x: 300, y: 200, width: 500, height: 400))
+        XCTAssertEqual(act(CGPoint(x: 700, y: 500), [appFront, appBack], focus: []),
+                       .activate(pid: frontPID, windowID: 2, windowBounds: appBack.bounds,
+                                 raiseWindow: true))
+    }
+
+    func testClickOnBackgroundWindowOfOtherAppOnSameDisplayRaisesExactWindow() {
+        let appFront = window(pid: otherPID, id: 2, rect: CGRect(x: 100, y: 100, width: 300, height: 200))
+        let appBack = window(pid: otherPID, id: 3, rect: CGRect(x: 400, y: 350, width: 400, height: 300))
+        XCTAssertEqual(act(CGPoint(x: 700, y: 500), [appFront, appBack],
+                           focus: [focusOnPrimary]),
+                       .activate(pid: otherPID, windowID: 3, windowBounds: appBack.bounds,
+                                 raiseWindow: true))
+    }
+
+    func testCrossDisplayOnlyModeKeepsOriginalSameDisplayRestriction() {
+        let inactive = window(pid: otherPID, id: 2, rect: CGRect(x: 100, y: 100, width: 400, height: 300))
+        XCTAssertEqual(act(CGPoint(x: 200, y: 200), [inactive], focus: [focusOnPrimary],
+                           includeSameDisplay: false),
+                       .ignore(.sameDisplay))
+    }
+
+    func testCrossDisplayOnlyModeIsInactiveWithOneMonitor() {
+        let inactive = window(pid: otherPID, id: 2, rect: CGRect(x: 100, y: 100, width: 400, height: 300))
+        XCTAssertEqual(act(CGPoint(x: 200, y: 200), [inactive], focus: [focusOnPrimary],
+                           screens: [primary], includeSameDisplay: false),
                        .ignore(.sameDisplay))
     }
 
@@ -166,7 +194,12 @@ final class WindowFinderTests: XCTestCase {
     }
 
     func testNothingOnScreenLeavesTheClickAlone() {
-        XCTAssertEqual(act(CGPoint(x: 700, y: 500), [], focus: []), .ignore(.focusDisplayUnknown))
+        XCTAssertEqual(act(CGPoint(x: 700, y: 500), [], focus: []), .ignore(.noWindowUnderCursor))
+    }
+
+    func testCrossDisplayOnlyModeNeedsAReferenceFocusWindow() {
+        XCTAssertEqual(act(CGPoint(x: 700, y: 500), [], focus: [],
+                           includeSameDisplay: false), .ignore(.focusDisplayUnknown))
     }
 
     // MARK: - Core behaviour
@@ -226,6 +259,13 @@ final class WindowFinderTests: XCTestCase {
     func testDockStripIsIgnored() {
         let windows = [primaryMenuBar, dockBackdrop, windowUnderTheDock]
         XCTAssertEqual(act(CGPoint(x: 700, y: 950), windows, dockStrip: dockStrip),
+                       .ignore(.menuBarOrDock))
+    }
+
+    func testDockStripIsIgnoredOnTheFocusedDisplay() {
+        let windows = [primaryMenuBar, dockBackdrop, windowUnderTheDock]
+        XCTAssertEqual(act(CGPoint(x: 700, y: 950), windows, dockStrip: dockStrip,
+                           focus: [focusOnPrimary]),
                        .ignore(.menuBarOrDock))
     }
 
@@ -330,6 +370,14 @@ final class WindowFinderTests: XCTestCase {
                        .ignore(.menuOpen))
     }
 
+    func testOpenMenuSuppressesActivationOnTheFocusedDisplay() {
+        let menu = window(pid: frontPID, id: 9, rect: CGRect(x: 40, y: 40, width: 200, height: 300),
+                          layer: WindowFinder.popUpMenuLayer)
+        XCTAssertEqual(act(CGPoint(x: 700, y: 500), [menu, fullWindow(pid: otherPID, id: 2)],
+                           focus: [focusOnPrimary]),
+                       .ignore(.menuOpen))
+    }
+
     func testFloatingPanelAboveTheWindowSuppressesActivation() {
         let panel = window(pid: frontPID, id: 8, rect: CGRect(x: 600, y: 400, width: 300, height: 200), layer: 3)
         XCTAssertEqual(act(CGPoint(x: 700, y: 500), [panel, fullWindow(pid: otherPID, id: 2)]),
@@ -410,6 +458,15 @@ final class WindowFinderTests: XCTestCase {
     func testClickOnANotificationIsLeftAlone() {
         let windows = [notificationBackdrop, dockBackdrop, fullWindow(pid: otherPID, id: 2)]
         XCTAssertEqual(act(CGPoint(x: 1170, y: 60), windows, notificationRects: [notificationBanner]),
+                       .ignore(.notificationContent))
+    }
+
+    /// Same-monitor activation must still leave the notification close button
+    /// to Notification Center instead of clicking the window beneath it.
+    func testSameDisplayNotificationCloseButtonIsProtected() {
+        let windows = [notificationBackdrop, dockBackdrop, fullWindow(pid: otherPID, id: 2)]
+        XCTAssertEqual(act(CGPoint(x: 1170, y: 60), windows,
+                           notificationRects: [notificationBanner], focus: [focusOnPrimary]),
                        .ignore(.notificationContent))
     }
 
@@ -503,10 +560,9 @@ final class WindowFinderTests: XCTestCase {
         XCTAssertEqual(reads, 1)
     }
 
-    /// The everyday click - one that stays on the display that already has focus
-    /// - must cost the window-list read and nothing else: no Accessibility round
-    /// trip to the Dock or to Notification Center, and no activation.
-    func testSameDisplayClickCostsOnlyTheWindowListRead() {
+    /// A same-monitor click activates its target with a single window-list
+    /// read, and skips Accessibility checks when no system backdrops overlap it.
+    func testSameDisplayClickReadsTheWindowListOnce() {
         var reads = 0
         var dockAsked = 0
         var centreAsked = 0
@@ -514,8 +570,7 @@ final class WindowFinderTests: XCTestCase {
         let action = WindowFinder.action(for: CGPoint(x: 700, y: 500),
                                         windows: {
                                             reads += 1
-                                            return [self.focusOnPrimary, self.primaryMenuBar,
-                                                    self.dockBackdrop, self.notificationBackdrop, app]
+                                            return [self.focusOnPrimary, self.primaryMenuBar, app]
                                         },
                                         frontmostPID: frontPID,
                                         frontmostIsSystemUI: false,
@@ -524,7 +579,8 @@ final class WindowFinderTests: XCTestCase {
                                         modifiers: [],
                                         dockState: { _ in dockAsked += 1; return nil },
                                         notificationRects: { _, _ in centreAsked += 1; return [] })
-        XCTAssertEqual(action, .ignore(.sameDisplay))
+        XCTAssertEqual(action, .activate(pid: otherPID, windowID: 2,
+                                         windowBounds: app.bounds, raiseWindow: false))
         XCTAssertEqual(reads, 1)
         XCTAssertEqual(dockAsked, 0)
         XCTAssertEqual(centreAsked, 0)
