@@ -24,3 +24,14 @@ jobs:
             -parallel-testing-enabled NO \
             CODE_SIGNING_ALLOWED=NO \
             test
+      - name: Build universal release
+        run: ./scripts/build-release.sh
+      - name: Package installable DMG
+        run: ./scripts/make-dmg.sh
+      - name: Upload DMG artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: ClickThrough-macOS-universal
+          path: build/ClickThrough.dmg
+          if-no-files-found: error
+          retention-days: 30
