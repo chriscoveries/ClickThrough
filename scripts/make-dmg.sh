@@ -14,11 +14,12 @@ cp -R "$APP" "$STAGE/"
 ln -s /Applications "$STAGE/Applications"
 
 rm -f "$DMG"
-if diskutil image create from --help >/dev/null 2>&1; then
-  # macOS 26+ replacement for `hdiutil create`.
-  # The source folder is named ClickThrough; this command has no --volumeName option.
-  diskutil image create from --format UDZO "$STAGE" "$DMG" >/dev/null
-else
+if command -v hdiutil >/dev/null 2>&1; then
+  # hdiutil remains the compatible UDZO writer on macOS 15 and older systems.
+  # diskutil exposes 'image create from' there but rejects the UDZO format.
   hdiutil create -volname ClickThrough -srcfolder "$STAGE" -ov -format UDZO "$DMG" >/dev/null
+else
+  # On newer systems without hdiutil, the source folder supplies the volume name.
+  diskutil image create from --format UDZO "$STAGE" "$DMG" >/dev/null
 fi
 echo "Built $DMG"
